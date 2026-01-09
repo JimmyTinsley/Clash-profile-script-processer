@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clash Verge Script Converter (Web Demo)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.0/js-yaml.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f3f4f6; }
+        .editor { font-family: 'Consolas', 'Monaco', monospace; font-size: 12px; }
+    </style>
+</head>
+<body class="p-6">
+
+<div class="max-w-7xl mx-auto bg-white rounded-lg shadow-lg p-6">
+    <h1 class="text-2xl font-bold mb-2 text-gray-800">🛠️ Clash 配置转换器 (Verge 脚本版)</h1>
+    <p class="text-sm text-gray-600 mb-6">
+        此工具用于在浏览器端模拟 Clash Verge 的脚本处理功能。你可以导入原始订阅，应用 JS 脚本，然后导出处理后的 YAML 给不支持脚本的客户端（如 Android/路由器）使用。
+    </p>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        
+        <div class="flex flex-col h-[600px]">
+            <h2 class="font-semibold mb-2 flex justify-between items-center">
+                1. 原始订阅 (YAML)
+                <button onclick="fetchUrl()" class="text-xs bg-blue-100 text-blue-600 px-2 py-1 rounded hover:bg-blue-200">从链接下载</button>
+            </h2>
+            <input type="text" id="subUrl" placeholder="粘贴订阅链接 (可能会有跨域问题)" class="mb-2 p-2 border rounded text-xs hidden">
+            <textarea id="inputYaml" class="editor flex-1 border border-gray-300 rounded p-2 bg-gray-50 focus:outline-none focus:border-blue-500" placeholder="在此粘贴 Clash 订阅的原始内容..."></textarea>
+        </div>
+
+        <div class="flex flex-col h-[600px]">
+            <h2 class="font-semibold mb-2">2. Verge 扩展脚本 (Javascript)</h2>
+            <textarea id="scriptJs" class="editor flex-1 border border-gray-300 rounded p-2 bg-gray-900 text-green-400 focus:outline-none focus:border-blue-500" spellcheck="false">// Clash Verge 风格脚本
+// 必须包含 main 函数
+
+function main(config) {
+  // 示例：修改日志级别
+  config['log-level'] = 'info';
+
+  // 示例：给所有代理组增加一个 DIRECT 选项
+  if (config['proxy-groups']) {
+    config['proxy-groups'].forEach(group => {
+       if(!group.proxies.includes('DIRECT')) {
+           group.proxies.push('DIRECT');
+       }
+    });
+  }
+
+  // 示例：过滤节点 (保留包含 '香港' 的节点)
+  // const proxies = config.proxies || [];
+  // config.proxies = proxies.filter(p => p.name.includes('香港'));
+
+  return config;
+}</textarea>
+            <button onclick="processConfig()" class="mt-4 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded shadow transition">
+                ⚡ 执行处理
+            </button>
+        </div>
+
+        <div class="flex flex-col h-[600px]">
+            <h2 class="font-semibold mb-2">3. 结果输出 (Standard YAML)</h2>
+            <textarea id="outputYaml" class="editor flex-1 border border-gray-300 rounded p-2 bg-gray-50 focus:outline-none" readonly placeholder="点击执行处理后，结果会显示在这里..."></textarea>
+            <div class="flex gap-2 mt-4">
+                <button onclick="copyOutput()" class="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded shadow text-sm">
+                    📋 复制结果
+                </button>
+                <button onclick="downloadOutput()" class="flex-1 bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded shadow text-sm">
+                    💾 下载文件
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <div id="statusMsg" class="mt-4 text-center text-sm font-medium text-gray-500"></div>
+</div>
+
+<script>
+    // 模拟从 URL 获取 (使用公共 CORS 代理，可能不稳定)
+    async function fetchUrl() {
+        const url = prompt("请输入订阅链接：\n注意：由于浏览器安全限制(CORS)，直接输入链接可能失败。\n建议直接在左侧粘贴文本。");
+        if (!url) return;
+        
+        showStatus("正在下载...", "text-blue-500");
+        try {
+            // 使用 corsproxy.io 绕过浏览器跨域限制
+            const proxyUrl = 'https://corsproxy.io/?' + encodeURIComponent(url);
+            const response = await fetch(proxyUrl);
+            if (!response.ok) throw new Error("下载失败");
+            const text = await response.text();
+            document.getElementById('inputYaml').value = text;
+            showStatus("下载成功！", "text-green-500");
+        } catch (e) {
+            alert("下载失败，请手动复制订阅内容到左侧文本框。\n错误信息: " + e.message);
+            showStatus("下载失败", "text-red-500");
+        }
+    }
+
+    function processConfig() {
+        const yamlText = document.getElementById('inputYaml').value;
+        const scriptText = document.getElementById('scriptJs').value;
+        const statusEl = document.getElementById('statusMsg');
+
+        if (!yamlText.trim()) {
+            alert("请先输入原始 YAML 配置");
+            return;
+        }
+
+        try {
+            showStatus("正在解析 YAML...", "text-blue-500");
+            // 1. 解析 YAML
+            let config = jsyaml.load(yamlText);
+
+            showStatus("正在执行脚本...", "text-blue-500");
+            
+            // 2. 构造脚本执行环境
+            // 我们创建一个 Function，把用户的代码包裹进去，并尝试提取 main 函数
+            // 这种方式比较 hack，但对于简单的 verge 脚本通常有效
+            const userScriptWrapper = new Function(`
+                ${scriptText}
+                if (typeof main === 'function') {
+                    return main;
+                } else {
+                    throw new Error("脚本中未找到 function main(config) {...}");
+                }
+            `);
+
+            const mainFunc = userScriptWrapper();
+            
+            // 3. 执行用户脚本
+            const newConfig = mainFunc(config);
+
+            if (!newConfig) {
+                throw new Error("脚本执行完毕，但没有返回 config 对象 (return config 丢失?)");
+            }
+
+            showStatus("正在生成 YAML...", "text-blue-500");
+            // 4. 转换回 YAML
+            const newYaml = jsyaml.dump(newConfig, {
+                lineWidth: -1, // 不折行
+                noRefs: true,  // 禁用引用，避免兼容性问题
+                quotingType: '"'
+            });
+
+            document.getElementById('outputYaml').value = newYaml;
+            showStatus("✅ 处理成功！", "text-green-600");
+
+        } catch (e) {
+            console.error(e);
+            alert("处理出错:\n" + e.message);
+            showStatus("❌ 发生错误: " + e.message, "text-red-600");
+        }
+    }
+
+    function copyOutput() {
+        const output = document.getElementById('outputYaml');
+        output.select();
+        document.execCommand('copy');
+        showStatus("已复制到剪贴板", "text-green-600");
+    }
+
+    function downloadOutput() {
+        const text = document.getElementById('outputYaml').value;
+        if(!text) return;
+        const blob = new Blob([text], { type: "text/yaml" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "processed_config.yaml";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    }
+
+    function showStatus(msg, colorClass) {
+        const el = document.getElementById('statusMsg');
+        el.className = `mt-4 text-center text-sm font-medium ${colorClass}`;
+        el.innerText = msg;
+    }
+</script>
+
+</body>
+</html>
